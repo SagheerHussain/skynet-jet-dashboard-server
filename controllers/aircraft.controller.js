@@ -175,6 +175,7 @@ const getLatestAircrafts = async (req, res) => {
 const getAircraftById = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(id)
     const aircraft = await Aircraft.findById({ _id: id }).populate("category").lean();
     if (!aircraft) {
       return res.status(404).json({ message: "Aircraft not found", success: false });
