@@ -1,5 +1,6 @@
 const Aircraft = require("../models/Aircraft.model");
 const cloudinary = require("../config/cloudinary");
+const Category = require("../models/AircraftCategory.model");
 const fs = require("fs/promises");
 const sanitizeHtml = require("sanitize-html");
 
