@@ -45,24 +45,106 @@ const parseJsonLoose = (str, label) => {
     throw new Error(`Invalid ${label} JSON`);
   }
 };
-/* ===================================================================== */
+
 
 /* ------------------- GET ---------------------- */
 const getAircraftsLists = async (req, res) => {
   try {
-    const p = Number(req.query.page) || 1;
-    const ps = Number(req.query.pageSize) || 10;
-    const skip = (p - 1) * ps;
+    const p = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const ps = Math.max(1, parseInt(req.query.pageSize, 10) || 16);
 
-    const aircrafts = await Aircraft.find().populate("category").skip(skip).limit(ps).lean();
-    if (aircrafts.length === 0) {
-      return res.status(200).json({ message: "No aircrafts found", success: false });
+    const {
+      status,                 // "for-sale" | "coming-soon" | ... | "all"
+      categories,             // "cirrus,piper,diamond"  (comma separated)
+      category,               // (also accept "category" or "aircraft" for flexibility)
+      aircraft,
+      minPrice,
+      maxPrice,
+      minAirframe,
+      maxAirframe,
+      minEngine,
+      maxEngine,
+    } = req.query;
+
+    console.log(req.query);
+
+    const toNum = (v) => (v === undefined ? undefined : Number(v));
+    const filter = {};
+
+    // by status
+    if (status && status !== "all") {
+      filter.status = status;
     }
 
-    const total = await Aircraft.countDocuments();
+    // by categories (slugs)
+    const catSlugStr = categories || category || aircraft;
+    if (catSlugStr) {
+      const slugs = String(catSlugStr)
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (slugs.length) {
+        const foundCats = await Category.find({ slug: { $in: slugs } })
+          .select("_id")
+          .lean();
+        const catIds = foundCats.map((c) => c._id);
+        // no category matches -> return empty result
+        filter.category = catIds.length ? { $in: catIds } : null;
+      }
+    }
+
+    // by price
+    const pMin = toNum(minPrice);
+    const pMax = toNum(maxPrice);
+    if (Number.isFinite(pMin) || Number.isFinite(pMax)) {
+      filter.price = {};
+      if (Number.isFinite(pMin)) filter.price.$gte = pMin;
+      if (Number.isFinite(pMax)) filter.price.$lte = pMax;
+    }
+
+    // by airframe
+    const aMin = toNum(minAirframe);
+    const aMax = toNum(maxAirframe);
+    if (Number.isFinite(aMin) || Number.isFinite(aMax)) {
+      filter.airframe = {};
+      if (Number.isFinite(aMin)) filter.airframe.$gte = aMin;
+      if (Number.isFinite(aMax)) filter.airframe.$lte = aMax;
+    }
+
+    // by engine
+    const eMin = toNum(minEngine);
+    const eMax = toNum(maxEngine);
+    if (Number.isFinite(eMin) || Number.isFinite(eMax)) {
+      filter.engine = {};
+      if (Number.isFinite(eMin)) filter.engine.$gte = eMin;
+      if (Number.isFinite(eMax)) filter.engine.$lte = eMax;
+    }
+
+    // null category shortcut (no match case)
+    if (filter.category === null) {
+      return res.status(200).json({
+        message: "No aircrafts found",
+        success: true,
+        data: [],
+        total: 0,
+        totalItems: 0,
+      });
+    }
+
+    const skip = (p - 1) * ps;
+
+    const total = await Aircraft.countDocuments(filter);
+
+    const aircrafts = await Aircraft.find(filter)
+      .sort({ createdAt: -1 })
+      .populate("category")
+      .skip(skip)
+      .limit(ps)
+      .lean();
 
     return res.status(200).json({
-      message: "Aircrafts found",
+      message: aircrafts.length ? "Aircrafts found" : "No aircrafts found",
       success: true,
       data: aircrafts,
       total: aircrafts.length,
