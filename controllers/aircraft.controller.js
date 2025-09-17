@@ -188,6 +188,32 @@ const getAircraftsLists = async (req, res) => {
   }
 };
 
+const getJetRanges = async (req, res) => {
+  try {
+    const aircrafts = await Aircraft.find().select("price airframe engine").lean();
+    if (aircrafts.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "No aircrafts found", success: false });
+    }
+
+    const minPrice = Math.min(...aircrafts.map((a) => a.price));
+    const maxPrice = Math.max(...aircrafts.map((a) => a.price));
+    const minAirframe = Math.min(...aircrafts.map((a) => a.airframe));
+    const maxAirframe = Math.max(...aircrafts.map((a) => a.airframe));
+    const minEngine = Math.min(...aircrafts.map((a) => a.engine));
+    const maxEngine = Math.max(...aircrafts.map((a) => a.engine));
+
+    return res.status(200).json({
+      message: "Aircrafts found",
+      success: true,
+      data: { minPrice, maxPrice, minAirframe, maxAirframe, minEngine, maxEngine },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message, success: false });
+  }
+}
+
 const getLatestAircrafts = async (req, res) => {
   try {
     const aircrafts = await Aircraft.find()
@@ -614,6 +640,7 @@ const bulkDeleteAircraft = async (req, res) => {
 
 module.exports = {
   getAircraftsLists,
+  getJetRanges,
   getLatestAircrafts,
   getAircraftById,
   getAircraftsByFilters,
