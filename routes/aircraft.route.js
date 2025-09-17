@@ -19,6 +19,7 @@ router.get("/lists", getAircraftsLists);
 router.get("/lists/latest", getLatestAircrafts);
 router.get("/lists/:id", getAircraftById);
 router.get("/lists/filters", getAircraftsByFilters);
+// router.get("/lists/facets", getAircraftFacets); 
 
 // POST  ✅ accept both "images" (multiple) and "featuredImage" (single)
 router.post(

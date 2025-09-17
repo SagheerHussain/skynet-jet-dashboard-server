@@ -9,19 +9,41 @@ const ROOT_FOLDER = "Mason Amelia Assets";
 // OPTIONAL: allowlist of tags/attrs you permit from Quill
 const SANITIZE_OPTS = {
   allowedTags: [
-    "p","br","strong","b","em","i","u","s","span","ul","ol","li","blockquote",
-    "h1","h2","h3","h4","h5","h6","a","img","code","pre","hr"
+    "p",
+    "br",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "u",
+    "s",
+    "span",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "a",
+    "img",
+    "code",
+    "pre",
+    "hr",
   ],
   allowedAttributes: {
-    a: ["href","name","target","rel"],
-    img: ["src","alt"],
-    span: ["class"]
+    a: ["href", "name", "target", "rel"],
+    img: ["src", "alt"],
+    span: ["class"],
   },
   // prevent javascript: links etc.
-  allowedSchemes: ["http","https","mailto","tel"],
+  allowedSchemes: ["http", "https", "mailto", "tel"],
   allowProtocolRelative: false,
   // (optional) strip empty tags
-  nonTextTags: ["style","script","textarea","noscript"]
+  nonTextTags: ["style", "script", "textarea", "noscript"],
 };
 
 /* ===================== Shared Helpers (top-level) ===================== */
@@ -47,18 +69,17 @@ const parseJsonLoose = (str, label) => {
   }
 };
 
-
 /* ------------------- GET ---------------------- */
 const getAircraftsLists = async (req, res) => {
   try {
-    const p = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const ps = Math.max(1, parseInt(req.query.pageSize, 10) || 16);
+    // ---------- pagination inputs ----------
+    const pageSize = Math.max(1, Number(req.query.pageSize) || 16);
+    const pageRequested = Math.max(1, Number(req.query.page) || 1);
 
+    // ---------- read filters from query ----------
     const {
-      status,                 // "for-sale" | "coming-soon" | ... | "all"
-      categories,             // "cirrus,piper,diamond"  (comma separated)
-      category,               // (also accept "category" or "aircraft" for flexibility)
-      aircraft,
+      status,       // optional, if 'all' then ignored
+      categories,   // comma-separated slugs
       minPrice,
       maxPrice,
       minAirframe,
@@ -67,35 +88,48 @@ const getAircraftsLists = async (req, res) => {
       maxEngine,
     } = req.query;
 
-    console.log(req.query);
+    const toNum = (v) =>
+      v === undefined || v === null || v === "" ? undefined : Number(v);
 
-    const toNum = (v) => (v === undefined ? undefined : Number(v));
     const filter = {};
 
-    // by status
+    // status
     if (status && status !== "all") {
       filter.status = status;
     }
 
-    // by categories (slugs)
-    const catSlugStr = categories || category || aircraft;
-    if (catSlugStr) {
-      const slugs = String(catSlugStr)
+    // categories by slug
+    if (categories) {
+      const slugs = String(categories)
         .split(",")
         .map((s) => s.trim().toLowerCase())
         .filter(Boolean);
 
       if (slugs.length) {
-        const foundCats = await Category.find({ slug: { $in: slugs } })
+        const found = await Category.find({ slug: { $in: slugs } })
           .select("_id")
           .lean();
-        const catIds = foundCats.map((c) => c._id);
-        // no category matches -> return empty result
-        filter.category = catIds.length ? { $in: catIds } : null;
+        const ids = found.map((c) => c._id);
+        if (ids.length === 0) {
+          return res.status(200).json({
+            message: "No aircrafts found",
+            success: true,
+            data: [],
+            total: 0,
+            totalItems: 0,
+            page: 1,
+            pageRequested,
+            pageSize,
+            pageCount: 0,
+            hasPrev: false,
+            hasNext: false,
+          });
+        }
+        filter.category = { $in: ids };
       }
     }
 
-    // by price
+    // price range
     const pMin = toNum(minPrice);
     const pMax = toNum(maxPrice);
     if (Number.isFinite(pMin) || Number.isFinite(pMax)) {
@@ -104,7 +138,7 @@ const getAircraftsLists = async (req, res) => {
       if (Number.isFinite(pMax)) filter.price.$lte = pMax;
     }
 
-    // by airframe
+    // airframe range
     const aMin = toNum(minAirframe);
     const aMax = toNum(maxAirframe);
     if (Number.isFinite(aMin) || Number.isFinite(aMax)) {
@@ -113,7 +147,7 @@ const getAircraftsLists = async (req, res) => {
       if (Number.isFinite(aMax)) filter.airframe.$lte = aMax;
     }
 
-    // by engine
+    // engine range
     const eMin = toNum(minEngine);
     const eMax = toNum(maxEngine);
     if (Number.isFinite(eMin) || Number.isFinite(eMax)) {
@@ -122,45 +156,49 @@ const getAircraftsLists = async (req, res) => {
       if (Number.isFinite(eMax)) filter.engine.$lte = eMax;
     }
 
-    // null category shortcut (no match case)
-    if (filter.category === null) {
-      return res.status(200).json({
-        message: "No aircrafts found",
-        success: true,
-        data: [],
-        total: 0,
-        totalItems: 0,
-      });
-    }
+    // ---------- count with SAME filter ----------
+    const totalItems = await Aircraft.countDocuments(filter);
+    const pageCount = Math.ceil(totalItems / pageSize); // can be 0
+    const page = pageCount > 0 ? Math.min(pageRequested, pageCount) : 1; // clamp only if there are items
+    const skip = (page - 1) * pageSize;
 
-    const skip = (p - 1) * ps;
-
-    const total = await Aircraft.countDocuments(filter);
-
-    const aircrafts = await Aircraft.find(filter)
+    // ---------- fetch page ----------
+    const data = await Aircraft.find(filter)
       .sort({ createdAt: -1 })
       .populate("category")
       .skip(skip)
-      .limit(ps)
+      .limit(pageSize)
       .lean();
 
     return res.status(200).json({
-      message: aircrafts.length ? "Aircrafts found" : "No aircrafts found",
+      message: data.length ? "Aircrafts found" : "No aircrafts found",
       success: true,
-      data: aircrafts,
-      total: aircrafts.length,
-      totalItems: total,
+      data,
+      total: data.length,      // items on this page
+      totalItems,              // total matching items
+      page,                    // effective (clamped) page
+      pageRequested,           // what client asked for
+      pageSize,
+      pageCount,
+      hasPrev: pageCount > 0 ? page > 1 : false,
+      hasNext: pageCount > 0 ? page < pageCount : false,
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message, success: false });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
 const getLatestAircrafts = async (req, res) => {
   try {
-    const aircrafts = await Aircraft.find().populate("category").sort({ createdAt: -1 }).limit(10).lean();
+    const aircrafts = await Aircraft.find()
+      .populate("category")
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
     if (aircrafts.length === 0) {
-      return res.status(200).json({ message: "No aircrafts found", success: false });
+      return res
+        .status(200)
+        .json({ message: "No aircrafts found", success: false });
     }
     return res.status(200).json({
       message: "Aircrafts found",
@@ -170,17 +208,23 @@ const getLatestAircrafts = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message, success: false });
   }
-}
+};
 
 const getAircraftById = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(id)
-    const aircraft = await Aircraft.findById({ _id: id }).populate("category").lean();
+    console.log(id);
+    const aircraft = await Aircraft.findById({ _id: id })
+      .populate("category")
+      .lean();
     if (!aircraft) {
-      return res.status(404).json({ message: "Aircraft not found", success: false });
+      return res
+        .status(404)
+        .json({ message: "Aircraft not found", success: false });
     }
-    return res.status(200).json({ message: "Aircraft found", success: true, data: aircraft });
+    return res
+      .status(200)
+      .json({ message: "Aircraft found", success: true, data: aircraft });
   } catch (error) {
     res.status(500).json({ message: error.message, success: false });
   }
@@ -189,8 +233,16 @@ const getAircraftById = async (req, res) => {
 const getAircraftsByFilters = async (req, res) => {
   try {
     const {
-      category, status, airframe, engine, propeller,
-      minPrice, maxPrice, search, page, pageSize,
+      category,
+      status,
+      airframe,
+      engine,
+      propeller,
+      minPrice,
+      maxPrice,
+      search,
+      page,
+      pageSize,
     } = req.query;
 
     const p = Number(page) || 1;
@@ -216,7 +268,9 @@ const getAircraftsByFilters = async (req, res) => {
     const aircrafts = await Aircraft.find(filters).skip(skip).limit(ps).lean();
 
     if (aircrafts.length === 0) {
-      return res.status(200).json({ message: "No aircrafts found", success: false });
+      return res
+        .status(200)
+        .json({ message: "No aircrafts found", success: false });
     }
 
     return res.status(200).json({
@@ -234,24 +288,54 @@ const getAircraftsByFilters = async (req, res) => {
 const createAircraft = async (req, res) => {
   try {
     let {
-      title, year, price, status, category, location,
-      description, overview, airframe, engine, propeller, contactAgent, videoUrl,
+      title,
+      year,
+      price,
+      status,
+      category,
+      location,
+      description,
+      overview,
+      airframe,
+      engine,
+      propeller,
+      contactAgent,
+      videoUrl,
     } = req.body;
 
-    if (!title || !price || !category || !location || !description || !overview) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+    if (
+      !title ||
+      !price ||
+      !category ||
+      !location ||
+      !description ||
+      !overview
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
     }
 
     const safeOverview = sanitizeHtml(overview, SANITIZE_OPTS);
 
     let descriptionObj;
     try {
-      descriptionObj = typeof description === "string" ? JSON.parse(description) : description;
+      descriptionObj =
+        typeof description === "string" ? JSON.parse(description) : description;
     } catch {
-      return res.status(400).json({ success: false, message: "Invalid description JSON" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid description JSON" });
     }
-    if (!descriptionObj || typeof descriptionObj !== "object" || !descriptionObj.sections) {
-      return res.status(400).json({ success: false, message: 'Invalid description: "sections" is required' });
+    if (
+      !descriptionObj ||
+      typeof descriptionObj !== "object" ||
+      !descriptionObj.sections
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid description: "sections" is required',
+      });
     }
 
     let contactAgentObj = null;
@@ -269,11 +353,13 @@ const createAircraft = async (req, res) => {
     engine = toNum(engine);
     propeller = toNum(propeller);
     if (Number.isNaN(price)) {
-      return res.status(400).json({ success: false, message: "Price must be a number" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Price must be a number" });
     }
 
     // ---------- NEW: pick files by field name ----------
-    const imagesFiles = (req.files?.images || []);
+    const imagesFiles = req.files?.images || [];
     const featuredFile = (req.files?.featuredImage || [])[0];
 
     // ---------- Upload gallery images ----------
@@ -340,9 +426,20 @@ const updateAircraft = async (req, res) => {
     const { id } = req.params;
 
     let {
-      title, year, price, status, category, location, overview,
-      description, airframe, engine, propeller,
-      contactAgent, videoUrl, keepImages,
+      title,
+      year,
+      price,
+      status,
+      category,
+      location,
+      overview,
+      description,
+      airframe,
+      engine,
+      propeller,
+      contactAgent,
+      videoUrl,
+      keepImages,
     } = req.body;
 
     const safeOverview = sanitizeHtml(overview, SANITIZE_OPTS);
@@ -350,12 +447,24 @@ const updateAircraft = async (req, res) => {
     let descriptionObj;
     if (description !== undefined) {
       try {
-        descriptionObj = typeof description === "string" ? JSON.parse(description) : description;
+        descriptionObj =
+          typeof description === "string"
+            ? JSON.parse(description)
+            : description;
       } catch {
-        return res.status(400).json({ success: false, message: "Invalid description JSON" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid description JSON" });
       }
-      if (!descriptionObj || typeof descriptionObj !== "object" || !descriptionObj.sections) {
-        return res.status(400).json({ success: false, message: 'Invalid description: "sections" is required' });
+      if (
+        !descriptionObj ||
+        typeof descriptionObj !== "object" ||
+        !descriptionObj.sections
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid description: "sections" is required',
+        });
       }
     }
 
@@ -368,27 +477,33 @@ const updateAircraft = async (req, res) => {
       }
     }
 
-    const yearNum      = toNum(year);
-    const priceNum     = toNum(price);
-    const airframeNum  = toNum(airframe);
-    const engineNum    = toNum(engine);
+    const yearNum = toNum(year);
+    const priceNum = toNum(price);
+    const airframeNum = toNum(airframe);
+    const engineNum = toNum(engine);
     const propellerNum = toNum(propeller);
     if (price !== undefined && Number.isNaN(priceNum)) {
-      return res.status(400).json({ success: false, message: "Price must be a number" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Price must be a number" });
     }
 
     let keep = [];
     if (keepImages !== undefined) {
       try {
-        keep = typeof keepImages === "string" ? JSON.parse(keepImages) : keepImages;
+        keep =
+          typeof keepImages === "string" ? JSON.parse(keepImages) : keepImages;
       } catch {
-        return res.status(400).json({ success: false, message: "Invalid keepImages (must be JSON array of URLs)" });
+        return res.status(400).json({
+          success: false,
+          message: "Invalid keepImages (must be JSON array of URLs)",
+        });
       }
       if (!Array.isArray(keep)) keep = [];
     }
 
     // ---------- NEW: pick files by field name ----------
-    const imagesFiles = (req.files?.images || []);
+    const imagesFiles = req.files?.images || [];
     const featuredFile = (req.files?.featuredImage || [])[0];
 
     // ---------- Upload new gallery images ----------
@@ -407,19 +522,19 @@ const updateAircraft = async (req, res) => {
 
     // ---------- Build patch ----------
     const patch = {};
-    if (title        !== undefined) patch.title        = title;
-    if (year         !== undefined) patch.year         = yearNum;
-    if (price        !== undefined) patch.price        = priceNum;
-    if (status       !== undefined) patch.status       = status;
-    if (category     !== undefined) patch.category     = category;
-    if (location     !== undefined) patch.location     = location;
-    if (description  !== undefined) patch.description  = descriptionObj;
-    if (overview     !== undefined) patch.overview     = safeOverview;
-    if (airframe     !== undefined) patch.airframe     = airframeNum;
-    if (engine       !== undefined) patch.engine       = engineNum;
-    if (propeller    !== undefined) patch.propeller    = propellerNum;
+    if (title !== undefined) patch.title = title;
+    if (year !== undefined) patch.year = yearNum;
+    if (price !== undefined) patch.price = priceNum;
+    if (status !== undefined) patch.status = status;
+    if (category !== undefined) patch.category = category;
+    if (location !== undefined) patch.location = location;
+    if (description !== undefined) patch.description = descriptionObj;
+    if (overview !== undefined) patch.overview = safeOverview;
+    if (airframe !== undefined) patch.airframe = airframeNum;
+    if (engine !== undefined) patch.engine = engineNum;
+    if (propeller !== undefined) patch.propeller = propellerNum;
     if (contactAgent !== undefined) patch.contactAgent = contactAgentObj;
-    if (videoUrl     !== undefined) patch.videoUrl     = videoUrl;
+    if (videoUrl !== undefined) patch.videoUrl = videoUrl;
 
     // ---------- If a new featured image file came, upload & replace ----------
     if (featuredFile) {
@@ -435,17 +550,32 @@ const updateAircraft = async (req, res) => {
     }
 
     const current = await Aircraft.findById(id).lean();
-    if (!current) return res.status(404).json({ success: false, message: "Aircraft not found" });
+    if (!current)
+      return res
+        .status(404)
+        .json({ success: false, message: "Aircraft not found" });
 
-    const baseKeep = keep.length ? keep : Array.isArray(current.images) ? current.images : [];
+    const baseKeep = keep.length
+      ? keep
+      : Array.isArray(current.images)
+      ? current.images
+      : [];
     patch.images = [...new Set([...(baseKeep || []), ...uploaded])];
 
-    const aircraft = await Aircraft.findByIdAndUpdate(id, { $set: patch }, { new: true });
+    const aircraft = await Aircraft.findByIdAndUpdate(
+      id,
+      { $set: patch },
+      { new: true }
+    );
     if (!aircraft) {
-      return res.status(404).json({ success: false, message: "Aircraft not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Aircraft not found" });
     }
 
-    return res.status(200).json({ success: true, message: "Aircraft updated", data: aircraft });
+    return res
+      .status(200)
+      .json({ success: true, message: "Aircraft updated", data: aircraft });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: err.message });
@@ -458,9 +588,13 @@ const deleteAircraft = async (req, res) => {
     const { id } = req.params;
     const aircraft = await Aircraft.findByIdAndDelete({ _id: id });
     if (!aircraft) {
-      return res.status(404).json({ message: "Aircraft not found", success: false });
+      return res
+        .status(404)
+        .json({ message: "Aircraft not found", success: false });
     }
-    return res.status(200).json({ message: "Aircraft deleted", success: true, data: aircraft });
+    return res
+      .status(200)
+      .json({ message: "Aircraft deleted", success: true, data: aircraft });
   } catch (error) {
     res.status(500).json({ message: error.message, success: false });
   }
@@ -470,7 +604,9 @@ const bulkDeleteAircraft = async (req, res) => {
   try {
     const { ids } = req.body;
     const aircrafts = await Aircraft.deleteMany({ _id: { $in: ids } });
-    return res.status(200).json({ message: "Aircrafts deleted", success: true, data: aircrafts });
+    return res
+      .status(200)
+      .json({ message: "Aircrafts deleted", success: true, data: aircrafts });
   } catch (error) {
     res.status(500).json({ message: error.message, success: false });
   }
