@@ -5,6 +5,7 @@ const fs = require("fs/promises");
 const sanitizeHtml = require("sanitize-html");
 
 const ROOT_FOLDER = "Mason Amelia Assets";
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // OPTIONAL: allowlist of tags/attrs you permit from Quill
 const SANITIZE_OPTS = {
@@ -182,6 +183,142 @@ const getAircraftsLists = async (req, res) => {
       pageCount,
       hasPrev: pageCount > 0 ? page > 1 : false,
       hasNext: pageCount > 0 ? page < pageCount : false,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+const getAircraftsBySearch = async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "12", 10), 1), 100);
+    const skip = (page - 1) * limit;
+
+    if (!q) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        total: 0,
+        page,
+        limit,
+        hasMore: false,
+      });
+    }
+
+    const regex = new RegExp(escapeRegex(q), "i");
+
+    const pipeline = [
+      // join category
+      {
+        $lookup: {
+          from: "aircraftcategories",           // Mongoose pluralized collection name
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+
+      // lightweight fields for matching + scoring
+      {
+        $addFields: {
+          categoryName: "$category.name",
+          categorySlug: "$category.slug",
+        },
+      },
+
+      // match on any of the fields
+      {
+        $match: {
+          $or: [
+            { title: { $regex: regex } },
+            { overview: { $regex: regex } },
+            { categoryName: { $regex: regex } },
+            { categorySlug: { $regex: regex } },
+          ],
+        },
+      },
+
+      // simple relevance score (title > overview > category)
+      {
+        $addFields: {
+          _score: {
+            $add: [
+              { $cond: [{ $regexMatch: { input: "$title", regex } }, 3, 0] },
+              { $cond: [{ $regexMatch: { input: "$overview", regex } }, 2, 0] },
+              {
+                $cond: [
+                  {
+                    $or: [
+                      { $regexMatch: { input: "$categoryName", regex } },
+                      { $regexMatch: { input: "$categorySlug", regex } },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            ],
+          },
+        },
+      },
+
+      // paginate + count in one go
+      {
+        $facet: {
+          data: [
+            { $sort: { _score: -1, updatedAt: -1 } },
+            {
+              $project: {
+                _score: 1,
+                title: 1,
+                year: 1,
+                price: 1,
+                status: 1,
+                airframe: 1,
+                engine: 1,
+                propeller: 1,
+                overview: 1,
+                featuredImage: 1,
+                images: 1,
+                videoUrl: 1,
+                location: 1,
+                category: {
+                  _id: "$category._id",
+                  name: "$category.name",
+                  slug: "$category.slug",
+                },
+                createdAt: 1,
+                updatedAt: 1,
+              },
+            },
+            { $skip: skip },
+            { $limit: limit },
+          ],
+          total: [{ $count: "count" }],
+        },
+      },
+      {
+        $project: {
+          data: 1,
+          total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] },
+        },
+      },
+    ];
+
+    const [result] = await Aircraft.aggregate(pipeline);
+    const data = result?.data ?? [];
+    const total = result?.total ?? 0;
+
+    return res.status(200).json({
+      success: true,
+      data,
+      total,
+      page,
+      limit,
+      hasMore: skip + data.length < total,
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -641,6 +778,7 @@ const bulkDeleteAircraft = async (req, res) => {
 module.exports = {
   getAircraftsLists,
   getJetRanges,
+  getAircraftsBySearch,
   getLatestAircrafts,
   getAircraftById,
   getAircraftsByFilters,
