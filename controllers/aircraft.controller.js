@@ -456,6 +456,8 @@ const createAircraft = async (req, res) => {
       price,
       status,
       category,
+      latitude,
+      longitude,
       location,
       description,
       overview,
@@ -558,6 +560,8 @@ const createAircraft = async (req, res) => {
       title,
       year,
       price,
+      latitude,
+      longitude,
       overview: safeOverview,
       status,
       category,
@@ -593,6 +597,8 @@ const updateAircraft = async (req, res) => {
       year,
       price,
       status,
+      latitude,
+      longitude,
       category,
       location,
       overview,
@@ -693,6 +699,8 @@ const updateAircraft = async (req, res) => {
     if (location !== undefined) patch.location = location;
     if (description !== undefined) patch.description = descriptionObj;
     if (overview !== undefined) patch.overview = safeOverview;
+    if (latitude !== undefined) patch.latitude = latitude;
+    if (longitude !== undefined) patch.longitude = longitude;
     if (airframe !== undefined) patch.airframe = airframeNum;
     if (engine !== undefined) patch.engine = engineNum;
     if (propeller !== undefined) patch.propeller = propellerNum;

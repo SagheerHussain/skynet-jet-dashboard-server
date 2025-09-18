@@ -17,6 +17,8 @@ const aircraftSchema = new mongoose.Schema(
         "acquired",
       ],
     },
+    latitude: { type: String },
+    longitude: { type: String },
     category: { type: mongoose.Schema.Types.ObjectId, ref: "AircraftCategory" },
     airframe: { type: Number },
     engine: { type: Number },
