@@ -22,7 +22,9 @@ const aircraftSchema = new mongoose.Schema(
     category: { type: mongoose.Schema.Types.ObjectId, ref: "AircraftCategory" },
     airframe: { type: Number },
     engine: { type: Number },
+    engineTwo: { type: Number },
     propeller: { type: Number },
+    propellerTwo: { type: Number },
     overview: { type: String },
     description: {
       version: { type: Number, default: 1 },

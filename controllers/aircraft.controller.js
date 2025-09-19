@@ -463,7 +463,9 @@ const createAircraft = async (req, res) => {
       overview,
       airframe,
       engine,
+      engineTwo,
       propeller,
+      propellerTwo,
       contactAgent,
       videoUrl,
     } = req.body;
@@ -516,7 +518,9 @@ const createAircraft = async (req, res) => {
     price = toNum(price);
     airframe = toNum(airframe);
     engine = toNum(engine);
+    engineTwo = toNum(engineTwo);
     propeller = toNum(propeller);
+    propellerTwo = toNum(propellerTwo);
     if (Number.isNaN(price)) {
       return res
         .status(400)
@@ -569,7 +573,9 @@ const createAircraft = async (req, res) => {
       description: descriptionObj,
       airframe,
       engine,
+      engineTwo,
       propeller,
+      propellerTwo,
       contactAgent: contactAgentObj,
       images: imageUrls,
       featuredImage: featuredUrl, // ✅ save it
@@ -605,7 +611,9 @@ const updateAircraft = async (req, res) => {
       description,
       airframe,
       engine,
+      engineTwo,
       propeller,
+      propellerTwo,
       contactAgent,
       videoUrl,
       keepImages,
@@ -650,7 +658,9 @@ const updateAircraft = async (req, res) => {
     const priceNum = toNum(price);
     const airframeNum = toNum(airframe);
     const engineNum = toNum(engine);
+    const engineTwoNum = toNum(engineTwo);
     const propellerNum = toNum(propeller);
+    const propellerTwoNum = toNum(propellerTwo);
     if (price !== undefined && Number.isNaN(priceNum)) {
       return res
         .status(400)
@@ -703,7 +713,9 @@ const updateAircraft = async (req, res) => {
     if (longitude !== undefined) patch.longitude = longitude;
     if (airframe !== undefined) patch.airframe = airframeNum;
     if (engine !== undefined) patch.engine = engineNum;
+    if (engineTwo !== undefined) patch.engineTwo = engineTwoNum;
     if (propeller !== undefined) patch.propeller = propellerNum;
+    if (propellerTwo !== undefined) patch.propellerTwo = propellerTwoNum;
     if (contactAgent !== undefined) patch.contactAgent = contactAgentObj;
     if (videoUrl !== undefined) patch.videoUrl = videoUrl;
 
