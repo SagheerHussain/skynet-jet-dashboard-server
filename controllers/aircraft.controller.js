@@ -927,6 +927,7 @@ async function applyIndexOnCreate(requestedIndex) {
  * Returns the final index to set on the updating doc.
  */
 async function applyIndexOnUpdate(docId, requestedIndex) {
+  console.log("Requested index:", requestedIndex);
   const total = await Aircraft.countDocuments();
   const idx = Number(requestedIndex);
 
@@ -954,6 +955,8 @@ async function applyIndexOnUpdate(docId, requestedIndex) {
       await Aircraft.findByIdAndUpdate(conflict._id, { $set: { index: total } });
     }
   }
+
+  console.log("Updated index:", idx);
 
   return idx;
 }
@@ -1053,7 +1056,7 @@ const getAircraftsLists = async (req, res) => {
 
     // ---------- fetch page ----------
     const data = await Aircraft.find(filter)
-      .sort({ index: 1, createdAt: -1 }) // ✅ index first
+      .sort({ index: 1 }) // ✅ index first
       .populate("category")
       .skip(skip)
       .limit(pageSize)
