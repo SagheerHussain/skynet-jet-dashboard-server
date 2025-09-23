@@ -39,6 +39,7 @@ const aircraftSchema = new mongoose.Schema(
     featuredImage: { type: String },
     videoUrl: { type: String },
     location: { type: String },
+    index: { type: Number },
   },
   { timestamps: true }
 );
