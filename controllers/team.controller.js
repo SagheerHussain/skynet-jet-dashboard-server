@@ -52,27 +52,35 @@ const getTeamById = async (req, res) => {
 /* ------------------- POST ---------------------- */
 const createTeam = async (req, res) => {
   try {
-    const { name, description, designation, phone, email, address, facebook, instagram, linkedin, youtube } = req.body;
+    const {
+      name, description, designation, phone, email, address,
+      facebook, instagram, linkedin, youtube
+    } = req.body;
 
-    console.log(req.body)
-
-    // FIX: validation
     if (!name || !description || !designation || !phone || !email) {
       return res.status(400).json({ message: "Missing required fields", success: false });
     }
 
-    // Sanitize Quill HTML
     const safeDescription = sanitizeHtml(description, SANITIZE_OPTS);
 
+    // ---- handle files from upload.fields ----
     let profileUrl = null;
-    if (req.file) {
-      const upload = await cloudinary.uploader.upload(req.file.path);
-      profileUrl = upload?.secure_url || null;
+    let detailUrl = null;
+
+    if (req.files?.profile_picture?.[0]) {
+      const uploadRes = await cloudinary.uploader.upload(req.files.profile_picture[0].path);
+      profileUrl = uploadRes?.secure_url || null;
+    }
+
+    if (req.files?.team_member_picture?.[0]) {
+      const uploadRes2 = await cloudinary.uploader.upload(req.files.team_member_picture[0].path);
+      detailUrl = uploadRes2?.secure_url || null;
     }
 
     const team = await Team.create({
       name,
-      profile_picture: profileUrl,
+      profile_picture: profileUrl,          // required by schema
+      team_member_picture: detailUrl,
       description: safeDescription,
       designation,
       phone,
@@ -94,17 +102,28 @@ const createTeam = async (req, res) => {
 const updateTeam = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, designation, phone, email, address, facebook, instagram, linkedin, youtube } = req.body;
+    const {
+      name, description, designation, phone, email, address,
+      facebook, instagram, linkedin, youtube
+    } = req.body;
 
     const existing = await Team.findById(id);
     if (!existing) {
       return res.status(404).json({ message: "Team not found", success: false });
     }
 
+    // start with existing values
     let profileUrl = existing.profile_picture || null;
-    if (req.file) {
-      const upload = await cloudinary.uploader.upload(req.file.path);
-      profileUrl = upload?.secure_url || profileUrl;
+    let detailUrl  = existing.team_member_picture || null;
+
+    if (req.files?.profile_picture?.[0]) {
+      const up1 = await cloudinary.uploader.upload(req.files.profile_picture[0].path);
+      profileUrl = up1?.secure_url || profileUrl;
+    }
+
+    if (req.files?.team_member_picture?.[0]) {
+      const up2 = await cloudinary.uploader.upload(req.files.team_member_picture[0].path);
+      detailUrl = up2?.secure_url || detailUrl;
     }
 
     const safeDescription = typeof description === "string"
@@ -116,6 +135,7 @@ const updateTeam = async (req, res) => {
       {
         name: name ?? existing.name,
         profile_picture: profileUrl,
+        team_member_picture: detailUrl,
         description: safeDescription,
         designation: designation ?? existing.designation,
         phone: phone ?? existing.phone,

@@ -9,6 +9,9 @@ const teamSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  team_member_picture: {
+    type: String,
+  },
   description: {
     type: String,
     required: true,
