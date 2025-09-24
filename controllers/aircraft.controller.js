@@ -1092,6 +1092,134 @@ const getAircraftsLists = async (req, res) => {
   }
 };
 
+const getAircraftListsByAdmin = async (req, res) => {
+  try {
+    // ---------- pagination inputs ----------
+    const pageSize = Math.max(1, Number(req.query.pageSize) || 16);
+    const pageRequested = Math.max(1, Number(req.query.page) || 1);
+
+    // ---------- read filters from query ----------
+    const {
+      status,       // optional, if 'all' then ignored
+      categories,   // comma-separated slugs
+      minPrice,
+      maxPrice,
+      minAirframe,
+      maxAirframe,
+      minEngine,
+      maxEngine,
+    } = req.query;
+
+    const toNumLocal = (v) =>
+      v === undefined || v === null || v === "" ? undefined : Number(v);
+
+    const norm = (s) => String(s ?? "").toLowerCase().trim();
+
+    const filter = {};
+
+    // status (normalized)
+    const statusNorm = norm(status);
+    if (statusNorm && statusNorm !== "all") {
+      filter.status = statusNorm;
+    }
+
+    // categories by slug
+    if (categories) {
+      const slugs = String(categories)
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (slugs.length) {
+        const found = await Category.find({ slug: { $in: slugs } })
+          .select("_id")
+          .lean();
+        const ids = found.map((c) => c._id);
+        if (ids.length === 0) {
+          return res.status(200).json({
+            message: "No aircrafts found",
+            success: true,
+            data: [],
+            total: 0,
+            totalItems: 0,
+            page: 1,
+            pageRequested,
+            pageSize,
+            pageCount: 0,
+            hasPrev: false,
+            hasNext: false,
+          });
+        }
+        filter.category = { $in: ids };
+      }
+    }
+
+    // price range
+    const pMin = toNumLocal(minPrice);
+    const pMax = toNumLocal(maxPrice);
+    if (Number.isFinite(pMin) || Number.isFinite(pMax)) {
+      filter.price = {};
+      if (Number.isFinite(pMin)) filter.price.$gte = pMin;
+      if (Number.isFinite(pMax)) filter.price.$lte = pMax;
+    }
+
+    // airframe range
+    const aMin = toNumLocal(minAirframe);
+    const aMax = toNumLocal(maxAirframe);
+    if (Number.isFinite(aMin) || Number.isFinite(aMax)) {
+      filter.airframe = {};
+      if (Number.isFinite(aMin)) filter.airframe.$gte = aMin;
+      if (Number.isFinite(aMax)) filter.airframe.$lte = aMax;
+    }
+
+    // engine range
+    const eMin = toNumLocal(minEngine);
+    const eMax = toNumLocal(maxEngine);
+    if (Number.isFinite(eMin) || Number.isFinite(eMax)) {
+      filter.engine = {};
+      if (Number.isFinite(eMin)) filter.engine.$gte = eMin;
+      if (Number.isFinite(eMax)) filter.engine.$lte = eMax;
+    }
+
+    // ---------- decide sort spec ----------
+    const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
+    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
+    const sortSpec = priceSortStatuses.has(statusNorm)
+      ? { price: -1, index: 1 }
+      : { index: 1 };
+
+    // ---------- count with SAME filter ----------
+    const totalItems = await Aircraft.countDocuments(filter);
+    const pageCount = Math.ceil(totalItems / pageSize);
+    const page = pageCount > 0 ? Math.min(pageRequested, pageCount) : 1;
+    const skip = (page - 1) * pageSize;
+
+    // ---------- fetch page ----------
+    const data = await Aircraft.find(filter)
+      .sort(sortSpec)
+      .populate("category")
+      .skip(skip)
+      .limit(pageSize)
+      .lean();
+
+    return res.status(200).json({
+      message: data.length ? "Aircrafts found" : "No aircrafts found",
+      success: true,
+      data,
+      total: data.length,
+      totalItems,
+      page,
+      pageRequested,
+      pageSize,
+      pageCount,
+      hasPrev: pageCount > 0 ? page > 1 : false,
+      hasNext: pageCount > 0 ? page < pageCount : false,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const getAircraftsBySearch = async (req, res) => {
   try {
     const q = (req.query.q || "").trim();
@@ -1729,6 +1857,7 @@ const bulkDeleteAircraft = async (req, res) => {
 
 module.exports = {
   getAircraftsLists,
+  getAircraftListsByAdmin,
   getJetRanges,
   getAircraftsBySearch,
   getLatestAircrafts,

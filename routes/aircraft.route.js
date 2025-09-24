@@ -4,6 +4,7 @@ const router = express.Router();
 
 const {
   getAircraftsLists,
+  getAircraftListsByAdmin,
   getJetRanges,
   getAircraftsBySearch,
   getLatestAircrafts,
@@ -18,6 +19,7 @@ const uploadImages = require("../upload");
 
 // GET
 router.get("/lists", getAircraftsLists);
+router.get("/lists/admin", getAircraftListsByAdmin);
 router.get("/lists/ranges", getJetRanges);
 router.get("/lists/search", getAircraftsBySearch);
 router.get("/lists/latest", getLatestAircrafts);
