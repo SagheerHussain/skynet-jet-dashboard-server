@@ -991,6 +991,8 @@ const getAircraftsLists = async (req, res) => {
     const statusNorm = norm(status);
     if (statusNorm && statusNorm !== "all") {
       filter.status = statusNorm;
+    } else {
+      filter.status = { $nin: ["sold", "acquired"] };
     }
 
     // categories by slug
