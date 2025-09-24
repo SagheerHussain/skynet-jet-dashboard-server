@@ -718,8 +718,10 @@ const createAircraft = async (req, res) => {
       !price ||
       !category ||
       !location ||
-      !description ||
-      !overview
+      !latitude ||
+      !longitude ||
+      !index ||
+      !contactAgent
     ) {
       return res
         .status(400)
