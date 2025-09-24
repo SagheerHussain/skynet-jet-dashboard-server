@@ -983,11 +983,14 @@ const getAircraftsLists = async (req, res) => {
     const toNumLocal = (v) =>
       v === undefined || v === null || v === "" ? undefined : Number(v);
 
+    const norm = (s) => String(s ?? "").toLowerCase().trim();
+
     const filter = {};
 
-    // status
-    if (status && status !== "all") {
-      filter.status = status;
+    // status (normalized)
+    const statusNorm = norm(status);
+    if (statusNorm && statusNorm !== "all") {
+      filter.status = statusNorm;
     }
 
     // categories by slug
@@ -1048,15 +1051,22 @@ const getAircraftsLists = async (req, res) => {
       if (Number.isFinite(eMax)) filter.engine.$lte = eMax;
     }
 
+    // ---------- decide sort spec ----------
+    const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
+    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
+    const sortSpec = priceSortStatuses.has(statusNorm)
+      ? { price: -1, index: 1 }
+      : { index: 1 };
+
     // ---------- count with SAME filter ----------
     const totalItems = await Aircraft.countDocuments(filter);
-    const pageCount = Math.ceil(totalItems / pageSize); // can be 0
-    const page = pageCount > 0 ? Math.min(pageRequested, pageCount) : 1; // clamp only if there are items
+    const pageCount = Math.ceil(totalItems / pageSize);
+    const page = pageCount > 0 ? Math.min(pageRequested, pageCount) : 1;
     const skip = (page - 1) * pageSize;
 
     // ---------- fetch page ----------
     const data = await Aircraft.find(filter)
-      .sort({ index: 1 }) // ✅ index first
+      .sort(sortSpec)
       .populate("category")
       .skip(skip)
       .limit(pageSize)
@@ -1066,10 +1076,10 @@ const getAircraftsLists = async (req, res) => {
       message: data.length ? "Aircrafts found" : "No aircrafts found",
       success: true,
       data,
-      total: data.length,      // items on this page
-      totalItems,              // total matching items
-      page,                    // effective (clamped) page
-      pageRequested,           // what client asked for
+      total: data.length,
+      totalItems,
+      page,
+      pageRequested,
       pageSize,
       pageCount,
       hasPrev: pageCount > 0 ? page > 1 : false,
