@@ -80,7 +80,7 @@ function ensurePositiveInt(idx) {
 /**
  * Apply index rules for CREATE.
  * - Allowed range: 1 .. (total + 1)
- * - If conflict at idx: move conflicting doc to end (total + 1), new doc takes idx.
+ * - If inserting within range, shift [idx..] down by +1
  * - If no index provided: returns (total + 1).
  * Returns the final index to set on the new doc.
  */
@@ -100,22 +100,19 @@ async function applyIndexOnCreate(requestedIndex) {
     throw new Error(`Index cannot be greater than ${total + 1}`);
   }
 
-  // If inserting exactly at the end, no need to shift
+  // If inserting at/before last existing item, shift down
   if (idx <= total) {
-    await Aircraft.updateMany(
-      { index: { $gte: idx } },
-      { $inc: { index: 1 } }
-    );
+    await Aircraft.updateMany({ index: { $gte: idx } }, { $inc: { index: 1 } });
   }
 
   return idx;
 }
 
-
 /**
  * Apply index rules for UPDATE.
  * - Allowed range: 1 .. total
- * - If conflict at idx: swap indexes (conflict gets updater's old index). If updater had no old index, move conflict to 'total' (last).
+ * - Move UP: shift [idx..old-1] down (+1)
+ * - Move DOWN: shift [old+1..idx] up (-1)
  * Returns the final index to set on the updating doc.
  */
 async function applyIndexOnUpdate(docId, requestedIndex) {
@@ -134,7 +131,6 @@ async function applyIndexOnUpdate(docId, requestedIndex) {
 
   const old = Number(current.index) || null;
   if (!ensurePositiveInt(old)) {
-    // If somehow old is missing, treat as moving from end
     if (idx <= total) {
       await Aircraft.updateMany(
         { _id: { $ne: docId }, index: { $gte: idx } },
@@ -144,16 +140,16 @@ async function applyIndexOnUpdate(docId, requestedIndex) {
     return idx;
   }
 
-  if (idx === old) return idx; // no-op
+  if (idx === old) return idx;
 
   if (idx < old) {
-    // Move UP: make space by shifting [idx..old-1] down (+1)
+    // Move UP
     await Aircraft.updateMany(
       { _id: { $ne: docId }, index: { $gte: idx, $lt: old } },
       { $inc: { index: 1 } }
     );
   } else {
-    // idx > old → Move DOWN: close gap by shifting [old+1..idx] up (-1)
+    // Move DOWN
     await Aircraft.updateMany(
       { _id: { $ne: docId }, index: { $gt: old, $lte: idx } },
       { $inc: { index: -1 } }
@@ -161,6 +157,27 @@ async function applyIndexOnUpdate(docId, requestedIndex) {
   }
 
   return idx;
+}
+
+/**
+ * Resequence all aircraft indexes to be 1..N (stable, deterministic).
+ * Sorts by current index asc, then createdAt asc (tie-breaker), then sets index = 1..N.
+ */
+async function resequenceAllIndices() {
+  const docs = await Aircraft.find({}, { _id: 1 })
+    .sort({ index: 1, createdAt: 1 })
+    .lean();
+
+  if (!docs.length) return;
+
+  const ops = docs.map((doc, i) => ({
+    updateOne: {
+      filter: { _id: doc._id },
+      update: { $set: { index: i + 1 } },
+    },
+  }));
+
+  await Aircraft.bulkWrite(ops, { ordered: false });
 }
 
 /* ------------------- GET ---------------------- */
@@ -257,7 +274,6 @@ const getAircraftsLists = async (req, res) => {
 
     // ---------- decide sort spec ----------
     const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
-    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
     const sortSpec = priceSortStatuses.has(statusNorm)
       ? { price: -1, index: 1 }
       : { index: 1 };
@@ -385,7 +401,6 @@ const getAircraftListsByAdmin = async (req, res) => {
 
     // ---------- decide sort spec ----------
     const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
-    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
     const sortSpec = priceSortStatuses.has(statusNorm)
       ? { price: -1, index: 1 }
       : { index: 1 };
@@ -500,7 +515,6 @@ const getAircraftsBySearch = async (req, res) => {
       {
         $facet: {
           data: [
-            // we keep relevance primary for search results
             { $sort: { _score: -1, updatedAt: -1 } },
             {
               $project: {
@@ -595,7 +609,7 @@ const getLatestAircrafts = async (req, res) => {
   try {
     const aircrafts = await Aircraft.find()
       .populate("category")
-      .sort({ index: 1, createdAt: -1 }) // ✅ use index order
+      .sort({ index: 1, createdAt: -1 })
       .limit(10)
       .lean();
     if (aircrafts.length === 0) {
@@ -667,7 +681,7 @@ const getAircraftsByFilters = async (req, res) => {
     }
 
     const aircrafts = await Aircraft.find(filters)
-      .sort({ index: 1, createdAt: -1 }) // ✅ index sort
+      .sort({ index: 1, createdAt: -1 })
       .skip(skip)
       .limit(ps)
       .lean();
@@ -1033,29 +1047,53 @@ const updateAircraft = async (req, res) => {
 const deleteAircraft = async (req, res) => {
   try {
     const { id } = req.params;
-    const aircraft = await Aircraft.findByIdAndDelete({ _id: id });
-    if (!aircraft) {
+
+    const victim = await Aircraft.findById(id).select("_id index").lean();
+    if (!victim) {
       return res
         .status(404)
         .json({ message: "Aircraft not found", success: false });
     }
-    return res
-      .status(200)
-      .json({ message: "Aircraft deleted", success: true, data: aircraft });
+
+    await Aircraft.deleteOne({ _id: id });
+
+    // Option A (fast, local shift) — optional:
+    // await Aircraft.updateMany({ index: { $gt: victim.index } }, { $inc: { index: -1 } });
+
+    // Option B (robust, simple): full resequence to guarantee 1..N contiguous
+    await resequenceAllIndices();
+
+    return res.status(200).json({
+      message: "Aircraft deleted and indices resequenced",
+      success: true,
+      data: { _id: id },
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message, success: false });
+    return res.status(500).json({ message: error.message, success: false });
   }
 };
 
 const bulkDeleteAircraft = async (req, res) => {
   try {
     const { ids } = req.body;
-    const aircrafts = await Aircraft.deleteMany({ _id: { $in: ids } });
-    return res
-      .status(200)
-      .json({ message: "Aircrafts deleted", success: true, data: aircrafts });
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "ids must be a non-empty array", success: false });
+    }
+
+    const del = await Aircraft.deleteMany({ _id: { $in: ids } });
+
+    // Bulk delete ke baad contiguous sequence ensure
+    await resequenceAllIndices();
+
+    return res.status(200).json({
+      message: "Aircrafts deleted and indices resequenced",
+      success: true,
+      data: { deletedCount: del.deletedCount || 0 },
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message, success: false });
+    return res.status(500).json({ message: error.message, success: false });
   }
 };
 
