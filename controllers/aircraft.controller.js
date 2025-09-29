@@ -88,7 +88,11 @@ async function applyIndexOnCreate(requestedIndex) {
   const total = await Aircraft.countDocuments();
 
   // No index provided → append
-  if (requestedIndex === undefined || requestedIndex === null || requestedIndex === "") {
+  if (
+    requestedIndex === undefined ||
+    requestedIndex === null ||
+    requestedIndex === ""
+  ) {
     return total + 1;
   }
 
@@ -180,6 +184,15 @@ async function resequenceAllIndices() {
   await Aircraft.bulkWrite(ops, { ordered: false });
 }
 
+function statusToMongo(statusRaw, norm) {
+  const s = norm(statusRaw);
+  if (!s || s === "all") return { $nin: ["sold", "acquired"] }; // your current default
+  if (s === "previous" || s === "previous-transactions") {
+    return { $in: ["sold", "acquired"] }; // ⬅️ merge Sold + Acquired
+  }
+  return s; // literal status like "for-sale", "off-market", etc.
+}
+
 /* ------------------- GET ---------------------- */
 const getAircraftsLists = async (req, res) => {
   try {
@@ -189,8 +202,8 @@ const getAircraftsLists = async (req, res) => {
 
     // ---------- read filters from query ----------
     const {
-      status,       // optional, if 'all' then ignored
-      categories,   // comma-separated slugs
+      status, // optional, if 'all' then ignored
+      categories, // comma-separated slugs
       minPrice,
       maxPrice,
       minAirframe,
@@ -202,17 +215,16 @@ const getAircraftsLists = async (req, res) => {
     const toNumLocal = (v) =>
       v === undefined || v === null || v === "" ? undefined : Number(v);
 
-    const norm = (s) => String(s ?? "").toLowerCase().trim();
+    const norm = (s) =>
+      String(s ?? "")
+        .toLowerCase()
+        .trim();
 
     const filter = {};
 
     // status (normalized)
-    const statusNorm = norm(status);
-    if (statusNorm && statusNorm !== "all") {
-      filter.status = statusNorm;
-    } else {
-      filter.status = { $nin: ["sold", "acquired"] };
-    }
+    const statusFilter = statusToMongo(status, norm);
+    filter.status = statusFilter;
 
     // categories by slug
     if (categories) {
@@ -273,10 +285,18 @@ const getAircraftsLists = async (req, res) => {
     }
 
     // ---------- decide sort spec ----------
-    const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
-    const sortSpec = priceSortStatuses.has(statusNorm)
-      ? { price: -1, index: 1 }
-      : { index: 1 };
+    const priceSortStatuses = new Set([
+      "for-sale",
+      "coming-soon",
+      "sale-pending",
+      "wanted",
+    ]);
+
+    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
+    const sortSpec =
+      typeof statusFilter === "string" && priceSortStatuses.has(statusFilter)
+        ? { price: -1, index: 1 }
+        : { index: 1 };
 
     // ---------- count with SAME filter ----------
     const totalItems = await Aircraft.countDocuments(filter);
@@ -318,8 +338,8 @@ const getAircraftListsByAdmin = async (req, res) => {
 
     // ---------- read filters from query ----------
     const {
-      status,       // optional, if 'all' then ignored
-      categories,   // comma-separated slugs
+      status, // optional, if 'all' then ignored
+      categories, // comma-separated slugs
       minPrice,
       maxPrice,
       minAirframe,
@@ -331,7 +351,10 @@ const getAircraftListsByAdmin = async (req, res) => {
     const toNumLocal = (v) =>
       v === undefined || v === null || v === "" ? undefined : Number(v);
 
-    const norm = (s) => String(s ?? "").toLowerCase().trim();
+    const norm = (s) =>
+      String(s ?? "")
+        .toLowerCase()
+        .trim();
 
     const filter = {};
 
@@ -400,7 +423,12 @@ const getAircraftListsByAdmin = async (req, res) => {
     }
 
     // ---------- decide sort spec ----------
-    const priceSortStatuses = new Set(["for-sale", "coming-soon", "sale-pending", "wanted"]);
+    const priceSortStatuses = new Set([
+      "for-sale",
+      "coming-soon",
+      "sale-pending",
+      "wanted",
+    ]);
     const sortSpec = priceSortStatuses.has(statusNorm)
       ? { price: -1, index: 1 }
       : { index: 1 };
@@ -441,7 +469,10 @@ const getAircraftsBySearch = async (req, res) => {
   try {
     const q = (req.query.q || "").trim();
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || "12", 10), 1), 100);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "12", 10), 1),
+      100
+    );
     const skip = (page - 1) * limit;
 
     if (!q) {
@@ -574,7 +605,9 @@ const getAircraftsBySearch = async (req, res) => {
 
 const getJetRanges = async (req, res) => {
   try {
-    const aircrafts = await Aircraft.find().select("price airframe engine").lean();
+    const aircrafts = await Aircraft.find()
+      .select("price airframe engine")
+      .lean();
     if (aircrafts.length === 0) {
       return res
         .status(200)
@@ -598,12 +631,19 @@ const getJetRanges = async (req, res) => {
     return res.status(200).json({
       message: "Aircrafts found",
       success: true,
-      data: { minPrice, maxPrice, minAirframe, maxAirframe, minEngine, maxEngine },
+      data: {
+        minPrice,
+        maxPrice,
+        minAirframe,
+        maxAirframe,
+        minEngine,
+        maxEngine,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: error.message, success: false });
   }
-}
+};
 
 const getLatestAircrafts = async (req, res) => {
   try {
@@ -822,7 +862,9 @@ const createAircraft = async (req, res) => {
     // ✅ Apply index for CREATE
     let finalIndex;
     try {
-      finalIndex = await applyIndexOnCreate(index !== undefined ? Number(index) : undefined);
+      finalIndex = await applyIndexOnCreate(
+        index !== undefined ? Number(index) : undefined
+      );
     } catch (e) {
       return res.status(400).json({ success: false, message: e.message });
     }
