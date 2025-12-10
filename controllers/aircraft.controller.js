@@ -57,7 +57,7 @@ const parseJsonLoose = (str, label) => {
   let s = str.trim();
   try {
     return JSON.parse(s); // strict first
-  } catch {}
+  } catch { }
   // quote unquoted keys → { name:"A" } => { "name":"A" }
   s = s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
   // single quotes → double
@@ -184,9 +184,22 @@ async function resequenceAllIndices() {
   await Aircraft.bulkWrite(ops, { ordered: false });
 }
 
-function statusToMongo(statusRaw, norm) {
+function statusToMongo(statusRaw, norm, searchKeyword) {
   const s = norm(statusRaw);
-  if (!s || s === "all") return { $nin: ["sold", "acquired"] }; // your current default
+  if (!s || s === "all") {
+    if (searchKeyword) {
+      return {
+        $in: [
+          "for-sale",
+          "sold",
+          "wanted",
+          "coming-soon",
+          "sale-pending",
+          "off-market",
+          "acquired",]
+      };
+    } else return { $nin: ["sold", "acquired"] }
+  }; // your current default
   if (s === "previous" || s === "previous-transactions") {
     return { $in: ["sold", "acquired"] }; // ⬅️ merge Sold + Acquired
   }
@@ -210,33 +223,26 @@ const getAircraftsLists = async (req, res) => {
       maxAirframe,
       minEngine,
       maxEngine,
+      searchKeyword, // added search keyword
     } = req.query;
 
-    const toNumLocal = (v) =>
-      v === undefined || v === null || v === "" ? undefined : Number(v);
+    console.log(req.query, searchKeyword)
 
-    const norm = (s) =>
-      String(s ?? "")
-        .toLowerCase()
-        .trim();
+    const toNumLocal = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+
+    const norm = (s) => String(s ?? "").toLowerCase().trim();
 
     const filter = {};
 
     // status (normalized)
-    const statusFilter = statusToMongo(status, norm);
+    const statusFilter = statusToMongo(status, norm, searchKeyword);
     filter.status = statusFilter;
 
     // categories by slug
     if (categories) {
-      const slugs = String(categories)
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-
+      const slugs = String(categories).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
       if (slugs.length) {
-        const found = await Category.find({ slug: { $in: slugs } })
-          .select("_id")
-          .lean();
+        const found = await Category.find({ slug: { $in: slugs } }).select("_id").lean();
         const ids = found.map((c) => c._id);
         if (ids.length === 0) {
           return res.status(200).json({
@@ -255,6 +261,16 @@ const getAircraftsLists = async (req, res) => {
         }
         filter.category = { $in: ids };
       }
+    }
+
+    // Add search keyword filter if provided
+    if (searchKeyword) {
+      const searchRegex = new RegExp(searchKeyword, 'i'); // Case-insensitive search
+      filter.$or = [
+        { title: searchRegex },
+        { overview: searchRegex },
+        { "category.name": searchRegex },
+      ];
     }
 
     // price range
@@ -292,7 +308,6 @@ const getAircraftsLists = async (req, res) => {
       "wanted",
     ]);
 
-    // If status is one of these -> sort by price DESC, then index ASC as tie-breaker
     const sortSpec =
       typeof statusFilter === "string" && priceSortStatuses.has(statusFilter)
         ? { price: -1, index: 1 }
@@ -841,7 +856,7 @@ const createAircraft = async (req, res) => {
         overwrite: false,
       });
       uploaded.push(r);
-      await fs.unlink(f.path).catch(() => {});
+      await fs.unlink(f.path).catch(() => { });
     }
     const imageUrls = uploaded.map((x) => x.secure_url);
 
@@ -856,7 +871,7 @@ const createAircraft = async (req, res) => {
         overwrite: false,
       });
       featuredUrl = fr.secure_url;
-      await fs.unlink(featuredFile.path).catch(() => {});
+      await fs.unlink(featuredFile.path).catch(() => { });
     }
 
     // ✅ Apply index for CREATE
@@ -1007,7 +1022,7 @@ const updateAircraft = async (req, res) => {
         overwrite: false,
       });
       uploaded.push(r.secure_url);
-      await fs.unlink(f.path).catch(() => {});
+      await fs.unlink(f.path).catch(() => { });
     }
 
     // ---------- Build patch ----------
@@ -1040,7 +1055,7 @@ const updateAircraft = async (req, res) => {
         overwrite: false,
       });
       patch.featuredImage = fr.secure_url;
-      await fs.unlink(featuredFile.path).catch(() => {});
+      await fs.unlink(featuredFile.path).catch(() => { });
     }
 
     // ✅ Apply index for UPDATE (if provided)
@@ -1061,8 +1076,8 @@ const updateAircraft = async (req, res) => {
     const baseKeep = keep.length
       ? keep
       : Array.isArray(current.images)
-      ? current.images
-      : [];
+        ? current.images
+        : [];
     patch.images = [...new Set([...(baseKeep || []), ...uploaded])];
 
     const aircraft = await Aircraft.findByIdAndUpdate(
