@@ -1,5 +1,6 @@
 // controllers/aircraft.controller.js
 const Aircraft = require("../models/Aircraft.model");
+const AircraftCategory = require("../models/AircraftCategory.model");
 const cloudinary = require("../config/cloudinary");
 const Category = require("../models/AircraftCategory.model");
 const fs = require("fs/promises");
@@ -758,6 +759,52 @@ const getAircraftsByFilters = async (req, res) => {
   }
 };
 
+const getRelatedAircrafts = async (req, res) => {
+  try {
+    const { category, status } = req.query;
+
+    // yahan sare OR conditions collect karenge
+    const orConditions = [];
+
+    // 1) Category ko slug / name se dhundo
+    if (category) {
+      const aircraftCategory = await AircraftCategory.findOne({
+        $or: [{ slug: category }, { name: category }],
+      }).select("_id");
+
+      if (aircraftCategory) {
+        orConditions.push({ category: aircraftCategory._id });
+      }
+    }
+
+    // 2) Status agar diya hai to use bhi OR ma add karo
+    if (status) {
+      orConditions.push({ status });
+    }
+
+    // agar na category sahi mili na status diya hai → koi valid filter nahi
+    if (orConditions.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No valid filters provided", success: false });
+    }
+
+    // 3) Ab query: category MATCH ho YA status MATCH ho
+    const aircrafts = await Aircraft.find({ $or: orConditions });
+
+    return res.status(200).json({
+      data: aircrafts,
+      message: aircrafts.length ? "Aircraft Found" : "No Aircraft Found",
+      success: true,
+    });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ message: "Server Error", success: false });
+  }
+};
+
 /* ------------------- POST ---------------------- */
 const createAircraft = async (req, res) => {
   try {
@@ -1162,6 +1209,7 @@ module.exports = {
   getLatestAircrafts,
   getAircraftById,
   getAircraftsByFilters,
+  getRelatedAircrafts,
   createAircraft,
   updateAircraft,
   deleteAircraft,

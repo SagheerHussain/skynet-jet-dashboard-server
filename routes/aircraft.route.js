@@ -10,6 +10,7 @@ const {
   getLatestAircrafts,
   getAircraftById,
   getAircraftsByFilters,
+  getRelatedAircrafts,
   createAircraft,
   updateAircraft,
   deleteAircraft,
@@ -25,6 +26,7 @@ router.get("/lists/search", getAircraftsBySearch);
 router.get("/lists/latest", getLatestAircrafts);
 router.get("/lists/:id", getAircraftById);
 router.get("/lists/filters", getAircraftsByFilters);
+router.get("/relatedAircrafts", getRelatedAircrafts)
 // router.get("/lists/facets", getAircraftFacets); 
 
 // POST  ✅ accept both "images" (multiple) and "featuredImage" (single)
