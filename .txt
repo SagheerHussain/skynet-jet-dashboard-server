@@ -1,0 +1,33 @@
+const categories = [ { name: "TBM", slug: "TBM", _id: "8492742sa" }, { name: "Socata", slug: "socata", _id: "1413151dfa" } ];
+const aicrafts = [ { category: "8492742sa" }, { category: "8492742sa" }, { category: "1413151dfa" } ];
+
+Result :
+[ { name: "TBM", slug: "tbm", count: 2 }, { name: "Socata", slug: "socata", count: 1 } ]
+
+My Logic:
+
+STEPS :
+1. count number of categories inside aircrafts.
+2. find that category inside categories and stored number of count inside object.
+3. return object
+
+for (int i = 0; i < aircrafts.length; i++) {
+    let count = 0;
+
+    for (int j = 0; j < i; i++) {
+        if (aircrafts[j].category === aircrafts[i].category) {
+            continue;
+        }
+    }
+
+    for (int j = i + 1; j < aircrafts.length; j++) {
+        if (aircrafts[i].category === aircrafts[j].category) {
+            count++;
+        }
+    }
+
+    categories.map((categ) => (
+        {...categ, index}
+    ))
+
+}

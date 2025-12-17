@@ -1,25 +1,59 @@
 const AircraftCategory = require("../models/AircraftCategory.model");
+const Aircrafts = require("../models/Aircraft.model");
 
 /* ------------------- GET ---------------------- */
 const getAircraftsCategoryLists = async (req, res) => {
   try {
     const aircraftsCategories = await AircraftCategory.find();
-    if (aircraftsCategories.length === 0) {
-      return res
-        .status(200)
-        .json({ message: "No aircrafts found", success: false });
+    const aircrafts = await Aircrafts.find()
+      .select("category")
+      .populate("category");
+
+    const result = [];
+
+    for (let i = 0; i < aircraftsCategories.length; i++) {
+      let count = 0;
+
+      for (let j = 0; j < aircrafts.length; j++) {
+        if (
+          aircrafts[j].category &&
+          aircrafts[j].category._id.toString() ===
+            aircraftsCategories[i]._id.toString()
+        ) {
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        result.push({
+          name: aircraftsCategories[i].name,
+          slug: aircraftsCategories[i].slug.toLowerCase(),
+          count,
+        });
+      } else {
+        result.push({
+          name: aircraftsCategories[i].name,
+          slug: aircraftsCategories[i].slug.toLowerCase(),
+          count: 0,
+        });
+      }
     }
-    return res
-      .status(200)
-      .json({
-        message: "Aircrafts found",
-        success: true,
-        data: aircraftsCategories,
-      });
+
+    const sortedResult = result.sort((a, b) => {
+      return b.count - a.count;
+    });
+
+    return res.status(200).json({
+      message: "Aircraft categories with count",
+      success: true,
+      data: sortedResult,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message, success: false });
+    console.log(error);
+    return res.status(500).json({ message: error.message, success: false });
   }
 };
+
 
 const getAircraftCategoryById = async (req, res) => {
   try {
